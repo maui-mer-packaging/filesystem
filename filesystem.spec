@@ -1,6 +1,6 @@
 Summary: The basic directory layout for a Linux system
 Name: filesystem
-Version: 3.1
+Version: 3.2
 Release: 1
 License: Public Domain
 URL: https://fedorahosted.org/filesystem
@@ -36,14 +36,26 @@ install -p -c -m755 %SOURCE3 %{buildroot}/iso_3166.sed
 cd %{buildroot}
 
 mkdir -p boot dev \
-        bin lib sbin \
-        etc/{X11/{applnk,fontpath.d},xdg/autostart,opt,pm/{config.d,power.d,sleep.d},xinetd.d,skel,sysconfig,pki} \
-        home media mnt opt proc root run/lock srv sys tmp \
-        usr/{bin,etc,games,include,%{_lib}/{games,sse2,tls,X11,pm-utils/{module.d,power.d,sleep.d}},lib/{games,locale,modules,sse2},libexec,local/{bin,etc,games,lib,%{_lib},sbin,src,share/{applications,man/man{1,2,3,4,5,6,7,8,9,n,1x,2x,3x,4x,5x,6x,7x,8x,9x},info},libexec,include,},sbin,share/{aclocal,applications,augeas/lenses,backgrounds,desktop-directories,dict,doc,empty,games,ghostscript/conf.d,gnome,icons,idl,info,man/man{1,2,3,4,5,6,7,8,9,n,1x,2x,3x,4x,5x,6x,7x,8x,9x,0p,1p,3p},mime-info,misc,omf,pixmaps,sounds,themes,xsessions,X11},src,src/kernels,src/debug} \
-        var/{adm,empty,gopher,lib/{games,misc,rpm-state},local,lock/subsys,log,nis,preserve,run,spool/{mail,lpd,uucp},tmp,db,cache,opt,games,yp}
+        etc/{X11/{applnk,fontpath.d},xdg/autostart,opt,pm/{config.d,power.d,sleep.d},xinetd.d,skel,sysconfig,pki,bash_completion.d} \
+        home media mnt opt proc root run srv sys tmp \
+        usr/{bin,games,include,%{_lib}/{games,sse2,tls,X11,pm-utils/{module.d,power.d,sleep.d}},lib/{debug/usr,games,locale,modules,sse2},libexec,local/{bin,etc,games,lib,%{_lib},sbin,src,share/{applications,man/man{1,2,3,4,5,6,7,8,9,n,1x,2x,3x,4x,5x,6x,7x,8x,9x},info},libexec,include,},sbin,share/{aclocal,appdata,applications,augeas/lenses,backgrounds,desktop-directories,dict,doc,empty,games,ghostscript/conf.d,gnome,icons,idl,info,man/man{1,2,3,4,5,6,7,8,9,n,1x,2x,3x,4x,5x,6x,7x,8x,9x,0p,1p,3p},mime-info,misc,omf,pixmaps,sounds,themes,xsessions,X11},src,src/kernels,src/debug} \
+        var/{adm,empty,gopher,lib/{games,misc,rpm-state},local,log,nis,preserve,spool/{mail,lpd},tmp,db,cache,opt,games,yp}
 
+#do not create the symlink atm.
+#ln -snf etc/sysconfig etc/default
 ln -snf ../var/tmp usr/tmp
 ln -snf spool/mail var/mail
+ln -snf usr/bin bin
+ln -snf usr/sbin sbin
+ln -snf usr/lib lib
+ln -snf usr/%{_lib} %{_lib}
+ln -snf ../run var/run
+ln -snf ../run/lock var/lock
+ln -snf usr/bin usr/lib/debug/bin
+ln -snf usr/lib usr/lib/debug/lib
+ln -snf usr/%{_lib} usr/lib/debug/%{_lib}
+ln -snf ../.dwz usr/lib/debug/usr/.dwz
+ln -snf usr/sbin usr/lib/debug/sbin
 
 sed -n -f %{buildroot}/iso_639.sed /usr/share/xml/iso-codes/iso_639.xml \
   >%{buildroot}/iso_639.tab
@@ -100,16 +112,50 @@ for i in man{1,2,3,4,5,6,7,8,9,n,1x,2x,3x,4x,5x,6x,7x,8x,9x,0p,1p,3p}; do
    echo "/usr/share/man/$i" >>$RPM_BUILD_DIR/filelist
 done
 
-%post -p <lua>
+%pretrans -p <lua>
+--# If we are running in pretrans in a fresh root, there is no /usr and
+--# symlinks. We cannot be sure, to be the very first rpm in the
+--# transaction list. Let's create the needed base directories and symlinks
+--# here, to place the files from other packages in the right locations.
+--# When our rpm is unpacked by cpio, it will set all permissions and modes
+--# later.
+posix.mkdir("/usr")
+posix.mkdir("/usr/bin")
+posix.mkdir("/usr/sbin")
+posix.mkdir("/usr/lib")
+posix.mkdir("/usr/lib/debug")
+posix.mkdir("/usr/lib/debug/usr/")
+posix.mkdir("/usr/%{_lib}")
+posix.symlink("usr/bin", "/bin")
+posix.symlink("usr/sbin", "/sbin")
+posix.symlink("usr/lib", "/lib")
+posix.symlink("usr/bin", "/usr/lib/debug/bin")
+posix.symlink("usr/lib", "/usr/lib/debug/lib")
+posix.symlink("usr/%{_lib}", "/usr/lib/debug/%{_lib}")
+posix.symlink("../.dwz", "/usr/lib/debug/usr/.dwz")
+posix.symlink("usr/sbin", "/usr/lib/debug/sbin")
+posix.symlink("usr/%{_lib}", "/%{_lib}")
+posix.mkdir("/run")
 posix.symlink("../run", "/var/run")
 posix.symlink("../run/lock", "/var/lock")
+return 0
+
+%posttrans
+#we need to restorecon on some dirs created in %pretrans or by other packages
+restorecon /var/run 2>/dev/null >/dev/null || :
+restorecon /var/lock 2>/dev/null >/dev/null || :
+restorecon -r /usr/lib/debug/ 2>/dev/null >/dev/null || :
+restorecon /sys 2>/dev/null >/dev/null || :
+restorecon /boot 2>dev/null >/dev/null || :
+restorecon /proc 2>dev/null >/dev/null || :
+restorecon /dev 2>dev/null >/dev/null || :
 
 %files -f filelist
-%exclude /documentation.list 
+%exclude /documentation.list
 %defattr(0755,root,root,-)
-/
+%dir %attr(555,root,root) /
 /bin
-/boot
+%attr(555,root,root) /boot
 /dev
 %dir /etc
 /etc/X11
@@ -120,42 +166,56 @@ posix.symlink("../run/lock", "/var/lock")
 /etc/skel
 /etc/sysconfig
 /etc/pki
+/etc/bash_completion.d/
 /home
 /lib
-%ifarch x86_64 ppc ppc64 sparc sparc64 s390 s390x
+%ifarch x86_64 ppc64 sparc64 s390x aarch64 ppc64le
 /%{_lib}
 %endif
 /media
 %dir /mnt
 %dir /opt
-/proc
-%attr(750,root,root) /root
+%attr(555,root,root) /proc
+%attr(550,root,root) /root
 /run
 /sbin
 /srv
-/sys
+%attr(555,root,root) /sys
 %attr(1777,root,root) /tmp
 %dir /usr
-/usr/bin
-/usr/etc
+%attr(555,root,root) /usr/bin
 /usr/games
 /usr/include
-/usr/lib
-%ifarch x86_64 ppc ppc64 sparc sparc64 s390 s390x
-/usr/%{_lib}
+%dir %attr(555,root,root) /usr/lib
+%dir /usr/lib/debug
+%ghost /usr/lib/debug/bin
+%ghost /usr/lib/debug/lib
+%ghost /usr/lib/debug/%{_lib}
+%ghost /usr/lib/debug/usr
+%ghost /usr/lib/debug/usr/.dwz
+%ghost /usr/lib/debug/sbin
+%attr(555,root,root) /usr/lib/games
+%attr(555,root,root) /usr/lib/sse2
+%ifarch x86_64 ppc64 sparc64 s390x aarch64 ppc64le
+%attr(555,root,root) /usr/%{_lib}
+%else
+%attr(555,root,root) /usr/lib/tls
+%attr(555,root,root) /usr/lib/X11
+%attr(555,root,root) /usr/lib/pm-utils
 %endif
 /usr/libexec
 /usr/local
-/usr/sbin
+%attr(555,root,root) /usr/sbin
 %dir /usr/share
 /usr/share/aclocal
+/usr/share/appdata
 /usr/share/applications
 /usr/share/augeas
 /usr/share/backgrounds
 /usr/share/desktop-directories
 /usr/share/dict
 /usr/share/doc
-%dir /usr/share/empty
+%attr(555,root,root) %dir /usr/share/empty
 /usr/share/games
 /usr/share/ghostscript
 /usr/share/gnome
@@ -183,18 +243,16 @@ posix.symlink("../run/lock", "/var/lock")
 /var/gopher
 /var/lib
 /var/local
-%ghost %dir %attr(755,root,root) /var/lock
-%ghost /var/lock/subsys
+%ghost /var/lock
 /var/log
 /var/mail
 /var/nis
 /var/opt
 /var/preserve
-%ghost %attr(755,root,root) /var/run
+%ghost /var/run
 %dir /var/spool
 %attr(755,root,root) /var/spool/lpd
 %attr(775,root,mail) /var/spool/mail
-%attr(755,uucp,uucp) /var/spool/uucp
 %attr(1777,root,root) /var/tmp
 /var/yp
 
